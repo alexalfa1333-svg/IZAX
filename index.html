@@ -195,21 +195,42 @@
       if (p <= 0) return;
       const scale = 0.06 + 0.94 * easeOutBack(p);   // chinna -> periya
       const size = R * 0.52 * scale;
+      const y = cy + size * 0.04;
+      const alpha = Math.min(p * 3, 1);             // lesa fade-in
 
+      // 1) Soft dark glow (box illa) - text kitta irukkura globe lines-a mellisa maraikkum
       ctx.save();
-      ctx.globalAlpha = Math.min(p * 3, 1);          // lesa fade-in
+      ctx.globalAlpha = alpha;
+      ctx.translate(cx, cy);
+      ctx.scale(1, 0.5);
+      const r = size * 1.9;
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+      g.addColorStop(0,    "rgba(0,0,0,0.92)");
+      g.addColorStop(0.6,  "rgba(0,0,0,0.80)");
+      g.addColorStop(1,    "rgba(0,0,0,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      // 2) IZAX text - globe lines maari white + athe glow
+      ctx.save();
+      ctx.globalAlpha = alpha;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.lineJoin = "round";
       ctx.font = `900 ${size}px "Arial Black", Arial, Helvetica, sans-serif`;
 
-      // black outline - box illama text clear-a theriya
-      ctx.lineWidth = size * 0.3;
+      // thin black edge (globe lines-a cut panna - original logo maari)
+      ctx.lineWidth = size * 0.1;
       ctx.strokeStyle = "#000";
-      ctx.strokeText("IZAX", cx, cy + size * 0.04);
+      ctx.strokeText("IZAX", cx, y);
 
-      ctx.fillStyle = "#fff";
-      ctx.fillText("IZAX", cx, cy + size * 0.04);
+      ctx.shadowColor = `rgba(${LINE_COLOR},0.55)`;
+      ctx.shadowBlur = size * 0.18;
+      ctx.fillStyle = `rgb(${LINE_COLOR})`;
+      ctx.fillText("IZAX", cx, y);
       ctx.restore();
     }
 

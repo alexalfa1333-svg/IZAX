@@ -7,91 +7,226 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; background: #000; color: #fff; font-family: system-ui, Arial, sans-serif; }
+    body.lock { overflow: hidden; }
 
-    /* ---------- LOGO INTRO ---------- */
+    /* ===== INTRO: rotating globe ===== */
     #intro {
       position: fixed; inset: 0; z-index: 9999;
       background: #000;
-      display: flex; align-items: center; justify-content: center;
-      transition: opacity .9s ease, visibility .9s ease;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      cursor: pointer;
+      transition: opacity 1s ease, visibility 1s ease;
     }
     #intro.hide { opacity: 0; visibility: hidden; }
 
-    .logo-wrap {
-      position: relative;
-      width: min(52vw, 280px);
+    #globe {
+      width: min(88vw, 480px);
       aspect-ratio: 1;
-    }
-    .logo-wrap img {
-      width: 100%; height: 100%;
-      border-radius: 50%;
-      display: block;
+      filter: drop-shadow(0 0 14px rgba(255,255,255,.28));
       opacity: 0;
-      animation: logoIn 1.6s cubic-bezier(.2,.8,.2,1) .2s forwards,
-                 glow 2.4s ease-in-out 1.8s infinite;
+      transform: scale(.7);
+      animation: appear 1.2s cubic-bezier(.2,.8,.2,1) .1s forwards;
     }
-    /* thin ring that expands behind the logo */
-    .logo-wrap::before, .logo-wrap::after {
-      content: ""; position: absolute; inset: 0;
-      border: 2px solid rgba(255,255,255,.6);
-      border-radius: 50%;
-      opacity: 0;
-      animation: ring 2s ease-out .6s forwards;
-    }
-    .logo-wrap::after { animation-delay: 1s; }
+    @keyframes appear { to { opacity: 1; transform: scale(1); } }
 
-    @keyframes logoIn {
-      0%   { opacity: 0; transform: scale(.4) rotate(-180deg); filter: blur(12px); }
-      70%  { opacity: 1; transform: scale(1.06) rotate(8deg);  filter: blur(0); }
-      100% { opacity: 1; transform: scale(1) rotate(0); filter: blur(0); }
-    }
-    @keyframes ring {
-      0%   { opacity: .8; transform: scale(1); }
-      100% { opacity: 0;  transform: scale(2.4); }
-    }
-    @keyframes glow {
-      0%, 100% { box-shadow: 0 0 20px rgba(255,255,255,.12); }
-      50%      { box-shadow: 0 0 55px rgba(255,255,255,.35); }
+    .skip {
+      position: absolute; bottom: 6vh;
+      font-size: 13px; letter-spacing: .06em;
+      color: rgba(255,255,255,.45);
     }
 
-    /* ---------- YOUR WEBSITE ---------- */
-    #site { opacity: 0; transition: opacity 1s ease .3s; padding: 40px 20px; text-align: center; }
+    /* ===== HOME PAGE ===== */
+    #site { opacity: 0; transition: opacity 1s ease .4s; padding: 60px 20px; text-align: center; }
     #site.show { opacity: 1; }
-
-    @media (prefers-reduced-motion: reduce) {
-      .logo-wrap img, .logo-wrap::before, .logo-wrap::after { animation: none; opacity: 1; }
-      .logo-wrap::before, .logo-wrap::after { opacity: 0; }
-    }
   </style>
 </head>
-<body>
+<body class="lock">
 
-  <!-- Logo animation -->
+  <!-- Globe intro -->
   <div id="intro">
-    <div class="logo-wrap">
-      <img src="logo.png" alt="IZAX logo">
-    </div>
+    <canvas id="globe"></canvas>
+    <div class="skip">Tap to enter</div>
   </div>
 
-  <!-- Unga website content inga podunga -->
+  <!-- Unga home page content inga podunga -->
   <main id="site">
     <h1>Welcome to IZAX</h1>
-    <p>Your website content goes here.</p>
+    <p style="margin-top:12px;color:#aaa">Your home page content goes here.</p>
   </main>
 
   <script>
-    // Intro 3.2 seconds-ku apram maraiyum
-    const INTRO_TIME = 3200;
+    /* ---------- SETTINGS (inga maathikalam) ---------- */
+    const INTRO_TIME = 6000;   // milliseconds. Intro evlo neram irukkanum
+    const SPEED      = 0.6;    // globe sutthura vegam (radians per second)
+    const LINE_COLOR = "255,255,255"; // white (RGB)
 
-    window.addEventListener("load", () => {
-      setTimeout(() => {
-        document.getElementById("intro").classList.add("hide");
-        document.getElementById("site").classList.add("show");
-        document.body.style.overflow = "auto";
-      }, INTRO_TIME);
-    });
+    /* ---------- SETUP ---------- */
+    const canvas = document.getElementById("globe");
+    const ctx = canvas.getContext("2d");
+    let W, R, cx, cy;
+    const TILT = 18 * Math.PI / 180;
+    const cosT = Math.cos(TILT), sinT = Math.sin(TILT);
 
-    document.body.style.overflow = "hidden";
+    function resize() {
+      const size = canvas.clientWidth;
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = size * dpr;
+      canvas.height = size * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      W = size; cx = W / 2; cy = W / 2; R = W * 0.34;
+    }
+    window.addEventListener("resize", resize);
+    resize();
+
+    /* 3D point -> screen point (with tilt) */
+    function project(x, y, z) {
+      const y2 = y * cosT - z * sinT;
+      const z2 = y * sinT + z * cosT;
+      return { x: cx + x * R, y: cy - y2 * R, z: z2 };
+    }
+
+    /* Draw a line made of many points; front = bright, back = faint */
+    function strokeLine(points, lw) {
+      const front = new Path2D(), back = new Path2D();
+      for (let i = 1; i < points.length; i++) {
+        const a = points[i - 1], b = points[i];
+        const p = (a.z + b.z) / 2 > 0 ? front : back;
+        p.moveTo(a.x, a.y);
+        p.lineTo(b.x, b.y);
+      }
+      ctx.lineCap = "round";
+      ctx.lineWidth = lw;
+      ctx.strokeStyle = `rgba(${LINE_COLOR},0.16)`;
+      ctx.stroke(back);
+      ctx.strokeStyle = `rgba(${LINE_COLOR},1)`;
+      ctx.stroke(front);
+    }
+
+    /* ---------- GLOBE ---------- */
+    function drawGlobe(rot) {
+      const lw = Math.max(2, R * 0.024);
+      const N = 90;
+
+      // outer circle
+      ctx.beginPath();
+      ctx.arc(cx, cy, R, 0, Math.PI * 2);
+      ctx.lineWidth = lw * 1.2;
+      ctx.strokeStyle = `rgba(${LINE_COLOR},1)`;
+      ctx.stroke();
+
+      // meridians (long lines - these rotate)
+      for (let k = 0; k < 6; k++) {
+        const L = rot + k * Math.PI / 6;
+        const pts = [];
+        for (let i = 0; i <= N; i++) {
+          const t = (i / N) * Math.PI * 2;
+          pts.push(project(Math.sin(L) * Math.cos(t), Math.sin(t), Math.cos(L) * Math.cos(t)));
+        }
+        strokeLine(pts, lw);
+      }
+
+      // parallels (cross lines)
+      [-60, -30, 0, 30, 60].forEach(deg => {
+        const phi = deg * Math.PI / 180;
+        const pts = [];
+        for (let i = 0; i <= N; i++) {
+          const a = (i / N) * Math.PI * 2;
+          pts.push(project(Math.cos(phi) * Math.sin(a), Math.sin(phi), Math.cos(phi) * Math.cos(a)));
+        }
+        strokeLine(pts, lw);
+      });
+    }
+
+    /* ---------- ORBIT ARROWS (globe-a sutthi varra arrows) ---------- */
+    const ORBIT_R = 1.3;
+    const ORBIT_Z = -38 * Math.PI / 180;   // orbit saaivu
+
+    function orbitPoint(t) {
+      const x = Math.cos(t) * ORBIT_R, z = Math.sin(t) * ORBIT_R;
+      const xr = x * Math.cos(ORBIT_Z), yr = x * Math.sin(ORBIT_Z);
+      return project(xr, yr, z);
+    }
+
+    function drawArrow(phase) {
+      const span = 1.7, steps = 46;
+      let prev = null;
+      for (let i = 0; i <= steps; i++) {
+        const t = phase - span + (i / steps) * span;
+        const p = orbitPoint(t);
+        if (prev) {
+          const alpha = p.z > 0 ? 1 : 0.18;
+          ctx.beginPath();
+          ctx.moveTo(prev.x, prev.y);
+          ctx.lineTo(p.x, p.y);
+          ctx.lineCap = "round";
+          ctx.lineWidth = 1 + (i / steps) * R * 0.055;   // thin -> thick
+          ctx.strokeStyle = `rgba(${LINE_COLOR},${alpha})`;
+          ctx.stroke();
+        }
+        prev = p;
+      }
+      // arrow head
+      const tip = orbitPoint(phase + 0.22);
+      const dx = tip.x - prev.x, dy = tip.y - prev.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len, uy = dy / len;
+      const w = R * 0.11;
+      const alpha = prev.z > 0 ? 1 : 0.18;
+      ctx.beginPath();
+      ctx.moveTo(tip.x, tip.y);
+      ctx.lineTo(prev.x - uy * w, prev.y + ux * w);
+      ctx.lineTo(prev.x + uy * w, prev.y - ux * w);
+      ctx.closePath();
+      ctx.fillStyle = `rgba(${LINE_COLOR},${alpha})`;
+      ctx.fill();
+    }
+
+    /* ---------- IZAX TEXT (naduvula nikkum, sutthadhu) ---------- */
+    function drawText() {
+      const bandH = R * 0.62;
+      // black band - globe lines-a vetti text-ku idam kudukkum
+      ctx.fillStyle = "#000";
+      ctx.fillRect(cx - R * 1.08, cy - bandH / 2, R * 2.16, bandH);
+
+      ctx.fillStyle = "#fff";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = `900 ${R * 0.5}px "Arial Black", Arial, Helvetica, sans-serif`;
+      ctx.fillText("IZAX", cx, cy + R * 0.02);
+    }
+
+    /* ---------- ANIMATION LOOP ---------- */
+    let last = performance.now(), rot = 0, orbit = 0;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    function frame(now) {
+      const dt = Math.min((now - last) / 1000, 0.05);
+      last = now;
+      if (!reduce) { rot += dt * SPEED; orbit += dt * SPEED * 1.5; }
+
+      ctx.clearRect(0, 0, W, W);
+      drawArrow(orbit);              // arrow 1
+      drawArrow(orbit + Math.PI);    // arrow 2 (ethir pakkam)
+      drawGlobe(rot);
+      drawText();
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+
+    /* ---------- INTRO -> HOME PAGE ---------- */
+    const intro = document.getElementById("intro");
+    const site = document.getElementById("site");
+    let done = false;
+
+    function enterSite() {
+      if (done) return;
+      done = true;
+      intro.classList.add("hide");
+      site.classList.add("show");
+      document.body.classList.remove("lock");
+    }
+    intro.addEventListener("click", enterSite);        // tap pannina skip aagum
+    setTimeout(enterSite, INTRO_TIME);                 // illa na auto-va povum
   </script>
 </body>
 </html>

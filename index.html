@@ -181,22 +181,41 @@
       ctx.fill();
     }
 
-    /* ---------- IZAX TEXT (naduvula nikkum, sutthadhu) ---------- */
-    function drawText() {
-      const bandH = R * 0.62;
-      // black band - globe lines-a vetti text-ku idam kudukkum
-      ctx.fillStyle = "#000";
-      ctx.fillRect(cx - R * 1.08, cy - bandH / 2, R * 2.16, bandH);
+    /* ---------- IZAX TEXT (box illa - sinnadhula irundhu perusaga varum) ---------- */
+    const TEXT_DELAY = 0.5;   // seconds - globe vandhu apram text start aagum
+    const TEXT_GROW  = 2.4;   // seconds - text perusaga aaga edukkum neram
 
-      ctx.fillStyle = "#fff";
+    function easeOutBack(x) {
+      const c1 = 1.5, c3 = c1 + 1;
+      return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
+    }
+
+    function drawText(elapsed) {
+      const p = Math.min(Math.max((elapsed - TEXT_DELAY) / TEXT_GROW, 0), 1);
+      if (p <= 0) return;
+      const scale = 0.06 + 0.94 * easeOutBack(p);   // chinna -> periya
+      const size = R * 0.52 * scale;
+
+      ctx.save();
+      ctx.globalAlpha = Math.min(p * 3, 1);          // lesa fade-in
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.font = `900 ${R * 0.5}px "Arial Black", Arial, Helvetica, sans-serif`;
-      ctx.fillText("IZAX", cx, cy + R * 0.02);
+      ctx.lineJoin = "round";
+      ctx.font = `900 ${size}px "Arial Black", Arial, Helvetica, sans-serif`;
+
+      // black outline - box illama text clear-a theriya
+      ctx.lineWidth = size * 0.3;
+      ctx.strokeStyle = "#000";
+      ctx.strokeText("IZAX", cx, cy + size * 0.04);
+
+      ctx.fillStyle = "#fff";
+      ctx.fillText("IZAX", cx, cy + size * 0.04);
+      ctx.restore();
     }
 
     /* ---------- ANIMATION LOOP ---------- */
-    let last = performance.now(), rot = 0, orbit = 0;
+    const startTime = performance.now();
+    let last = startTime, rot = 0, orbit = 0;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     function frame(now) {
@@ -208,7 +227,7 @@
       drawArrow(orbit);              // arrow 1
       drawArrow(orbit + Math.PI);    // arrow 2 (ethir pakkam)
       drawGlobe(rot);
-      drawText();
+      drawText((now - startTime) / 1000);
       requestAnimationFrame(frame);
     }
     requestAnimationFrame(frame);

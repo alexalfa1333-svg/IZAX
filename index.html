@@ -2,12 +2,28 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>IZAX</title>
+
+  <!-- ===== APP MODE (PWA) meta - phone/laptop/iPad ellathulayum app maari open aaga ===== -->
+  <meta name="application-name" content="IZAX">
+  <meta name="theme-color" content="#000000">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="IZAX">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="format-detection" content="telephone=no">
+  <!-- manifest & icons JS-la automatic-a create aagum (keela script paarunga) -->
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; background: #000; color: #fff; font-family: system-ui, Arial, sans-serif; }
     body.lock { overflow: hidden; }
+    body {
+      overscroll-behavior: none;                 /* app maari bounce/pull-refresh illa */
+      -webkit-tap-highlight-color: transparent;
+      -webkit-touch-callout: none;
+      -webkit-text-size-adjust: 100%;
+    }
 
     /* ===== INTRO: rotating globe ===== */
     #intro {
@@ -61,14 +77,45 @@
     }
 
     .skip {
-      position: absolute; bottom: 6vh;
+      position: absolute; bottom: calc(6vh + env(safe-area-inset-bottom, 0px));
       font-size: 13px; letter-spacing: .06em;
       color: rgba(255,255,255,.45);
     }
 
     /* ===== HOME PAGE ===== */
-    #site { opacity: 0; transition: opacity 1s ease .4s; padding: 60px 20px; text-align: center; }
+    #site { opacity: 0; transition: opacity 1s ease .4s; text-align: center;
+      padding: calc(60px + env(safe-area-inset-top, 0px)) 20px calc(100px + env(safe-area-inset-bottom, 0px)); }
     #site.show { opacity: 1; }
+
+    /* ===== INSTALL APP button + iPhone guide ===== */
+    #installBtn {
+      position: fixed; z-index: 50; left: 50%; transform: translateX(-50%);
+      bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+      padding: 14px 26px; border-radius: 999px;
+      background: #fff; color: #000; border: 0;
+      font: 700 15px/1 system-ui, Arial, sans-serif; letter-spacing: .02em;
+      box-shadow: 0 0 24px rgba(255,255,255,.25);
+      cursor: pointer;
+    }
+    #installBtn[hidden], #iosTip[hidden] { display: none; }
+
+    #iosTip {
+      position: fixed; z-index: 60; inset: 0;
+      background: rgba(0,0,0,.7);
+      display: flex; align-items: flex-end; justify-content: center;
+    }
+    #iosTip .sheet {
+      width: min(100%, 460px);
+      background: #111; border: 1px solid #333; border-radius: 22px 22px 0 0;
+      padding: 24px 22px calc(24px + env(safe-area-inset-bottom, 0px));
+      text-align: left;
+    }
+    #iosTip h3 { font-size: 18px; margin-bottom: 14px; }
+    #iosTip ol { padding-left: 20px; line-height: 1.9; color: #ddd; font-size: 15px; }
+    #iosTip button {
+      margin-top: 18px; width: 100%; padding: 13px; border-radius: 12px;
+      border: 0; background: #fff; color: #000; font: 700 15px system-ui, Arial, sans-serif;
+    }
   </style>
 </head>
 <body class="lock">
@@ -86,7 +133,134 @@
     <p style="margin-top:12px;color:#aaa">Your home page content goes here.</p>
   </main>
 
+  <!-- App Install button (install pannalam-nu irundha mattum theriyum) -->
+  <button id="installBtn" hidden>Install IZAX App</button>
+
+  <!-- iPhone / iPad guide -->
+  <div id="iosTip" hidden>
+    <div class="sheet">
+      <h3>IZAX app-a install pannunga</h3>
+      <ol>
+        <li>Safari-la keela ulla <b>Share</b> button (&#11014;&#65039;) tap pannunga</li>
+        <li>Scroll panni <b>Add to Home Screen</b> tap pannunga</li>
+        <li>Mela <b>Add</b> tap pannunga. Home screen-la IZAX app vandhurum</li>
+      </ol>
+      <button id="iosClose">Seri</button>
+    </div>
+  </div>
+
   <script>
+    /* ===================================================================
+       APP MODE (PWA) - icon, manifest, service worker, install button
+       =================================================================== */
+
+    /* 1) App icon - code-layae create aagum, image file thevai illa */
+    function makeIcon(size) {
+      const c = document.createElement("canvas");
+      c.width = c.height = size;
+      const g = c.getContext("2d");
+      g.fillStyle = "#000";
+      g.fillRect(0, 0, size, size);
+
+      const x = size / 2, y = size * 0.44, r = size * 0.26;
+      g.strokeStyle = "#fff";
+      g.lineWidth = size * 0.02;
+      g.lineCap = "round";
+
+      g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.stroke();                 // globe outline
+      [0.4, 0.72].forEach(k => {                                                  // meridians
+        g.beginPath(); g.ellipse(x, y, r * k, r, 0, 0, Math.PI * 2); g.stroke();
+      });
+      g.beginPath(); g.moveTo(x, y - r); g.lineTo(x, y + r); g.stroke();
+      [-0.5, 0, 0.5].forEach(k => {                                               // parallels
+        const hw = r * Math.sqrt(1 - k * k);
+        g.beginPath(); g.ellipse(x, y + r * k, hw, hw * 0.2, 0, 0, Math.PI); g.stroke();
+      });
+
+      g.fillStyle = "#fff";
+      g.textAlign = "center";
+      g.textBaseline = "middle";
+      g.font = `900 ${size * 0.13}px "Arial Black", Arial, sans-serif`;
+      g.fillText("IZAX", x, size * 0.82);
+      return c.toDataURL("image/png");
+    }
+
+    /* 2) iPhone / iPad home screen icon */
+    const touchIcon = document.createElement("link");
+    touchIcon.rel = "apple-touch-icon";
+    touchIcon.href = makeIcon(180);
+    document.head.appendChild(touchIcon);
+
+    const favicon = document.createElement("link");
+    favicon.rel = "icon";
+    favicon.href = makeIcon(64);
+    document.head.appendChild(favicon);
+
+    /* 3) Web App Manifest (Android / Windows / Mac / iPad Chrome, Edge) */
+    (function () {
+      const base = location.origin + location.pathname.replace(/[^/]*$/, "");
+      const manifest = {
+        id: base,
+        name: "IZAX",
+        short_name: "IZAX",
+        start_url: base,
+        scope: base,
+        display: "standalone",
+        background_color: "#000000",
+        theme_color: "#000000",
+        icons: [
+          { src: makeIcon(192), sizes: "192x192", type: "image/png", purpose: "any" },
+          { src: makeIcon(512), sizes: "512x512", type: "image/png", purpose: "any" },
+          { src: makeIcon(512), sizes: "512x512", type: "image/png", purpose: "maskable" }
+        ]
+      };
+      const link = document.createElement("link");
+      link.rel = "manifest";
+      link.href = URL.createObjectURL(new Blob([JSON.stringify(manifest)], { type: "application/manifest+json" }));
+      document.head.appendChild(link);
+    })();
+
+    /* 4) Service worker (sw.js file same folder-la irukkanum) - offline-um work aagum */
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("sw.js").catch(() => {});
+      });
+    }
+
+    /* 5) Install button */
+    const installBtn = document.getElementById("installBtn");
+    const iosTip = document.getElementById("iosTip");
+    const isStandalone = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+                  (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    let deferredPrompt = null;
+
+    window.addEventListener("beforeinstallprompt", (e) => {   // Android, Windows, Mac (Chrome/Edge)
+      e.preventDefault();
+      deferredPrompt = e;
+      if (!isStandalone) installBtn.hidden = false;
+    });
+    window.addEventListener("appinstalled", () => { installBtn.hidden = true; deferredPrompt = null; });
+
+    if (isIOS && !isStandalone) installBtn.hidden = false;    // iPhone / iPad - guide kaattum
+
+    installBtn.addEventListener("click", async () => {
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        await deferredPrompt.userChoice;
+        deferredPrompt = null;
+        installBtn.hidden = true;
+      } else if (isIOS) {
+        iosTip.hidden = false;
+      }
+    });
+    document.getElementById("iosClose").addEventListener("click", () => { iosTip.hidden = true; });
+    iosTip.addEventListener("click", (e) => { if (e.target === iosTip) iosTip.hidden = true; });
+
+    /* ===================================================================
+       INTRO ANIMATION
+       =================================================================== */
+
     /* ---------- SETTINGS (inga maathikalam) ---------- */
     const INTRO_TIME = 6000;   // milliseconds. Intro evlo neram irukkanum
     const SPEED      = 0.6;    // globe sutthura vegam (radians per second)

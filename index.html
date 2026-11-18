@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>IZAX</title>
 
-  <!-- ===== APP MODE (PWA) meta - phone/laptop/iPad ellathulayum app maari open aaga ===== -->
+  <!-- ===== APP MODE (PWA) meta - makes the site open like an app on phone, laptop and iPad ===== -->
   <meta name="application-name" content="IZAX">
   <meta name="theme-color" content="#000000">
   <meta name="mobile-web-app-capable" content="yes">
@@ -13,13 +13,13 @@
   <meta name="apple-mobile-web-app-title" content="IZAX">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="format-detection" content="telephone=no">
-  <!-- manifest & icons JS-la automatic-a create aagum (keela script paarunga) -->
+  <!-- manifest and icons are created automatically by the script below -->
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; background: #000; color: #fff; font-family: system-ui, Arial, sans-serif; }
     body.lock { overflow: hidden; }
     body {
-      overscroll-behavior: none;                 /* app maari bounce/pull-refresh illa */
+      overscroll-behavior: none;                 /* no bounce / pull-to-refresh, like a native app */
       -webkit-tap-highlight-color: transparent;
       -webkit-touch-callout: none;
       -webkit-text-size-adjust: 100%;
@@ -46,14 +46,14 @@
     }
     @keyframes appear { to { opacity: 1; transform: scale(1); } }
 
-    /* IZAX - globe-ku keela, clean-a oru oru letter-a varum */
+    /* IZAX text - sits below the globe, letters animate in one by one */
     .brand {
       margin-top: calc(var(--w) * -0.1);
       font-family: "Arial Black", Arial, Helvetica, sans-serif;
       font-weight: 900;
       font-size: calc(var(--w) * 0.17);
       letter-spacing: .1em;
-      padding-left: .1em;              /* letter-spacing-ala center maaraama irukka */
+      padding-left: .1em;              /* keeps the text centered despite letter-spacing */
       color: #fff;
       text-shadow: 0 0 14px rgba(255,255,255,.28);
       line-height: 1;
@@ -127,25 +127,25 @@
     <div class="skip">Tap to enter</div>
   </div>
 
-  <!-- Unga home page content inga podunga -->
+  <!-- Put your home page content here -->
   <main id="site">
     <h1>Welcome to IZAX</h1>
     <p style="margin-top:12px;color:#aaa">Your home page content goes here.</p>
   </main>
 
-  <!-- App Install button (install pannalam-nu irundha mattum theriyum) -->
+  <!-- Install button (shown only when the app can be installed) -->
   <button id="installBtn" hidden>Install IZAX App</button>
 
   <!-- iPhone / iPad guide -->
   <div id="iosTip" hidden>
     <div class="sheet">
-      <h3>IZAX app-a install pannunga</h3>
+      <h3>Install the IZAX app</h3>
       <ol>
-        <li>Safari-la keela ulla <b>Share</b> button (&#11014;&#65039;) tap pannunga</li>
-        <li>Scroll panni <b>Add to Home Screen</b> tap pannunga</li>
-        <li>Mela <b>Add</b> tap pannunga. Home screen-la IZAX app vandhurum</li>
+        <li>Tap the <b>Share</b> button (&#11014;&#65039;) in Safari</li>
+        <li>Scroll down and tap <b>Add to Home Screen</b></li>
+        <li>Tap <b>Add</b>. The IZAX app will appear on your home screen</li>
       </ol>
-      <button id="iosClose">Seri</button>
+      <button id="iosClose">Got it</button>
     </div>
   </div>
 
@@ -154,7 +154,7 @@
        APP MODE (PWA) - icon, manifest, service worker, install button
        =================================================================== */
 
-    /* 1) App icon - code-layae create aagum, image file thevai illa */
+    /* 1) App icon - created in code, no image file needed */
     function makeIcon(size) {
       const c = document.createElement("canvas");
       c.width = c.height = size;
@@ -220,7 +220,7 @@
       document.head.appendChild(link);
     })();
 
-    /* 4) Service worker (sw.js file same folder-la irukkanum) - offline-um work aagum */
+    /* 4) Service worker (sw.js must be in the same folder) - enables offline use */
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
         navigator.serviceWorker.register("sw.js").catch(() => {});
@@ -242,7 +242,7 @@
     });
     window.addEventListener("appinstalled", () => { installBtn.hidden = true; deferredPrompt = null; });
 
-    if (isIOS && !isStandalone) installBtn.hidden = false;    // iPhone / iPad - guide kaattum
+    if (isIOS && !isStandalone) installBtn.hidden = false;    // iPhone / iPad - show the install guide
 
     installBtn.addEventListener("click", async () => {
       if (deferredPrompt) {
@@ -261,9 +261,9 @@
        INTRO ANIMATION
        =================================================================== */
 
-    /* ---------- SETTINGS (inga maathikalam) ---------- */
-    const INTRO_TIME = 6000;   // milliseconds. Intro evlo neram irukkanum
-    const SPEED      = 0.6;    // globe sutthura vegam (radians per second)
+    /* ---------- SETTINGS (you can change these) ---------- */
+    const INTRO_TIME = 6000;   // milliseconds - how long the intro stays
+    const SPEED      = 0.6;    // globe rotation speed (radians per second)
     const LINE_COLOR = "255,255,255"; // white (RGB)
 
     /* ---------- SETUP ---------- */
@@ -343,9 +343,9 @@
       });
     }
 
-    /* ---------- ORBIT ARROWS (globe-a sutthi varra arrows) ---------- */
+    /* ---------- ORBIT ARROWS (arrows circling the globe) ---------- */
     const ORBIT_R = 1.3;
-    const ORBIT_Z = -38 * Math.PI / 180;   // orbit saaivu
+    const ORBIT_Z = -38 * Math.PI / 180;   // orbit tilt
 
     function orbitPoint(t) {
       const x = Math.cos(t) * ORBIT_R, z = Math.sin(t) * ORBIT_R;
@@ -398,7 +398,7 @@
 
       ctx.clearRect(0, 0, W, W);
       drawArrow(orbit);              // arrow 1
-      drawArrow(orbit + Math.PI);    // arrow 2 (ethir pakkam)
+      drawArrow(orbit + Math.PI);    // arrow 2 (opposite side)
       drawGlobe(rot);
       requestAnimationFrame(frame);
     }
@@ -416,8 +416,8 @@
       site.classList.add("show");
       document.body.classList.remove("lock");
     }
-    intro.addEventListener("click", enterSite);        // tap pannina skip aagum
-    setTimeout(enterSite, INTRO_TIME);                 // illa na auto-va povum
+    intro.addEventListener("click", enterSite);        // tap to skip
+    setTimeout(enterSite, INTRO_TIME);                 // otherwise continues automatically
   </script>
 </body>
 </html>

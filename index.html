@@ -149,10 +149,13 @@ footer a{margin-right:18px;cursor:pointer}
 <script>
 /* =================== SETTINGS: change these =================== */
 const CONFIG = {
-  whatsapp: "94000000000",     // your WhatsApp number with country code, no + or spaces
-  currency: "LKR",
-  adminPassword: "izax@123"    // change this!
+  supabaseUrl: "YOUR_SUPABASE_URL",        // example: https://abcdxyz.supabase.co
+  supabaseKey: "YOUR_SUPABASE_PUBLIC_KEY", // the "anon" / "publishable" key (it is safe to put it here)
+  whatsapp: "94000000000",                 // your WhatsApp number with country code, no + or spaces
+  currency: "LKR"
 };
+const BASE = CONFIG.supabaseUrl.replace(/\/$/, "");
+const LIVE = /^https:\/\/[\w-]+\.supabase\.co$/.test(BASE) && CONFIG.supabaseKey.length > 20;
 
 /* =================== HELPERS =================== */
 const $ = s => document.querySelector(s);
@@ -163,17 +166,22 @@ const LS = {
 };
 const money = n => CONFIG.currency + " " + Number(n).toLocaleString("en-US");
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const SAMPLE = [{ id: "s1", name: "Sample Product", price: 2500, desc: "This is a sample. Open Admin at the bottom of the page and add your own products.", img: "", soldOut: false }];
+const SAMPLE = [{ id: "s1", name: "Sample Product", price: 2500, desc: "This is a sample. Connect Supabase (see the setup steps) to add your own products.", img: "", soldOut: false }];
 let products = [], cart = LS.get("izax_cart", {}), admin = false, editId = null, introDone = false;
 const saveCart = () => { LS.set("izax_cart", cart); badge(); };
-const real = () => products.filter(p => p.id !== "s1");
 
 /* =================== PRODUCTS =================== */
-async function load() {
-  let list = LS.get("izax_draft", null);              // admin's unpublished changes (this device only)
-  if (!list) { try { const r = await fetch("products.json?v=" + Date.now()); if (r.ok) list = await r.json(); } catch {} }
-  products = Array.isArray(list) && list.length ? list : SAMPLE;
-  render();
+let lastSig = "";
+async function load(force) {
+  if (!LIVE) { products = SAMPLE; render(); return; }
+  try {
+    const rows = await SB.req("/rest/v1/products?select=*&order=created_at.desc", { headers: SB.h() });
+    const list = rows.map(r => ({ id: r.id, name: r.name, price: +r.price, desc: r.description || "", img: r.img || "", soldOut: !!r.sold_out }));
+    const sig = JSON.stringify(list);
+    if (force || sig !== lastSig) { lastSig = sig; products = list; render(); }
+  } catch (e) {
+    if (!products.length) $("#grid").innerHTML = `<p class="mut">Could not load products. Please check your connection and refresh.</p>`;
+  }
 }
 function render() {
   $("#grid").innerHTML = products.map((p, i) => `
@@ -183,7 +191,7 @@ function render() {
       <p class="pr">${p.soldOut ? "Sold out" : "From " + money(p.price)}</p>
       <div class="btns">${p.soldOut ? "" : `<button class="btn" data-a="buy" data-id="${p.id}">Buy</button>`}<button class="btn o" data-a="detail" data-id="${p.id}">Details</button></div>
       ${p.img ? `<img src="${p.img}" alt="${esc(p.name)}" loading="lazy">` : `<div class="ph">IZAX</div>`}
-    </article>`).join("");
+    </article>`).join("") || `<p class="mut">New products are coming soon.</p>`;
   observe(); badge();
 }
 function badge() { const n = Object.values(cart).reduce((a, b) => a + b, 0); $("#badge").textContent = n || ""; }
@@ -216,26 +224,47 @@ function placeOrder() {
   const n = $("#cn").value.trim(), ph = $("#cp").value.trim(), ad = $("#ca").value.trim(), nt = $("#cx").value.trim();
   if (!n || !ph || !ad) { alert("Please enter your name, phone number and address."); return; }
   let total = 0;
-  const lines = Object.keys(cart).map((id, i) => { const p = products.find(x => x.id === id); if (!p) return ""; total += p.price * cart[id]; return `${i + 1}. ${p.name} x ${cart[id]} - ${money(p.price * cart[id])}`; }).filter(Boolean).join("\n");
+  const items = Object.keys(cart).map(id => { const p = products.find(x => x.id === id); if (!p) return null; total += p.price * cart[id]; return { name: p.name, qty: cart[id], price: p.price }; }).filter(Boolean);
+  const lines = items.map((i, k) => `${k + 1}. ${i.name} x ${i.qty} - ${money(i.price * i.qty)}`).join("\n");
   const oid = "IZ-" + Date.now().toString(36).toUpperCase().slice(-6);
   const text = `*New order ${oid}*\n\n${lines}\n\n*Total: ${money(total)}*\n\nName: ${n}\nPhone: ${ph}\nAddress: ${ad}` + (nt ? `\nNote: ${nt}` : "");
+  if (LIVE) fetch(BASE + "/rest/v1/orders", { method: "POST", keepalive: true, headers: SB.h({ Prefer: "return=minimal" }), body: JSON.stringify({ order_no: oid, name: n, phone: ph, address: ad, note: nt, items, total }) }).catch(() => {});
   window.open("https://wa.me/" + CONFIG.whatsapp + "?text=" + encodeURIComponent(text), "_blank");
   cart = {}; saveCart();
   sheet(`<h3>Thank you!</h3><p class="mut">Your order ${oid} was sent. We will confirm it with you on WhatsApp shortly.</p>`);
 }
 
-/* =================== ADMIN =================== */
-const loginHTML = () => `<h3>Admin</h3><p class="mut">Enter the admin password.</p><input id="pw" type="password" placeholder="Password"><button class="btn wide" data-a="login">Log in</button>`;
+/* =================== ADMIN (Supabase) =================== */
+const SB = {
+  token: null,
+  h(x) { const h = { apikey: CONFIG.supabaseKey, "Content-Type": "application/json" }; if (SB.token) h.Authorization = "Bearer " + SB.token; return Object.assign(h, x || {}); },
+  async req(path, opt) {
+    const r = await fetch(BASE + path, opt), t = await r.text();
+    if (!r.ok) throw new Error(t || r.status);
+    return t ? JSON.parse(t) : null;
+  }
+};
+const sess = LS.get("izax_sess", null);
+if (sess && sess.exp > Date.now()) SB.token = sess.t;
+async function adm(fn) {
+  try { await fn(); }
+  catch (e) {
+    const m = String(e.message);
+    if (/row-level|permission/i.test(m)) alert("This account is not allowed to do that. Check the admin email in your SQL policy.");
+    else if (/jwt|expired|401/i.test(m)) { SB.token = null; LS.del("izax_sess"); alert("Please log in again."); sheet(loginHTML()); }
+    else alert("Something went wrong: " + m);
+  }
+}
+const loginHTML = () => `<h3>Admin login</h3><p class="mut">Use the admin email and password you created in Supabase.</p><input id="pe" type="email" placeholder="Email" autocomplete="username"><input id="pw" type="password" placeholder="Password" autocomplete="current-password"><button class="btn wide" data-a="login">Log in</button>`;
 function adminHTML() {
   const e = products.find(p => p.id === editId) || {};
-  return `<h3>Admin</h3><p class="mut sm">${editId ? "Editing product" : "Add a new product"}</p>
+  return `<h3>Admin</h3><p class="mut sm">${editId ? "Editing product" : "Add a new product. It goes live for everyone straight away."}</p>
     <input id="an" placeholder="Product name" value="${esc(e.name)}"><input id="ap" type="number" placeholder="Price (${CONFIG.currency})" value="${e.price == null ? "" : e.price}"><textarea id="ad" rows="3" placeholder="Description">${esc(e.desc)}</textarea><input id="af" type="file" accept="image/*">
+    <p class="mut sm">Tip: export your design from Canva as PNG or JPG, save it to Photos, then choose it here.</p>
     <button class="btn wide" data-a="save">${editId ? "Update" : "Add"} product</button>${editId ? `<button class="btn o wide" data-a="cancel">Cancel</button>` : ""}
     <h3 style="margin-top:28px;font-size:20px">Your products</h3>` +
-    (real().map(p => `<div class="row"><div class="gr"><b>${esc(p.name)}</b><span class="mut">${money(p.price)}${p.soldOut ? " - sold out" : ""}</span></div><button class="sb" data-a="edit" data-id="${p.id}">Edit</button><button class="sb" data-a="sold" data-id="${p.id}">${p.soldOut ? "Restock" : "Sold out"}</button><button class="sb" data-a="del" data-id="${p.id}">Delete</button></div>`).join("") || `<p class="mut">No products yet.</p>`) +
-    `<button class="btn wide" data-a="export">Download products.json</button>
-    <p class="mut sm">To show your changes to all visitors: download products.json, then upload it to your GitHub repo next to index.html (replace the old one).</p>
-    <button class="btn o wide" data-a="reset">Discard unpublished changes</button>`;
+    (products.map(p => `<div class="row"><div class="gr"><b>${esc(p.name)}</b><span class="mut">${money(p.price)}${p.soldOut ? " - sold out" : ""}</span></div><button class="sb" data-a="edit" data-id="${p.id}">Edit</button><button class="sb" data-a="sold" data-id="${p.id}">${p.soldOut ? "Restock" : "Sold out"}</button><button class="sb" data-a="del" data-id="${p.id}">Delete</button></div>`).join("") || `<p class="mut">No products yet.</p>`) +
+    `<div class="btns"><button class="btn o" data-a="orders">View orders</button><button class="btn o" data-a="logout">Log out</button></div>`;
 }
 function compress(file) {
   return new Promise(res => {
@@ -244,43 +273,59 @@ function compress(file) {
     r.readAsDataURL(file);
   });
 }
-const draft = () => LS.set("izax_draft", real());
 async function saveP() {
   const name = $("#an").value.trim(), pv = $("#ap").value;
   if (!name || pv === "") { alert("Enter a product name and price."); return; }
   const old = products.find(p => p.id === editId), f = $("#af").files[0];
-  const img = f ? await compress(f) : (old ? old.img : "");
-  const item = { id: old ? old.id : Date.now().toString(36), name, price: +pv, desc: $("#ad").value.trim(), img, soldOut: old ? !!old.soldOut : false };
-  products = real();
-  if (old) products = products.map(p => p.id === item.id ? item : p); else products.unshift(item);
-  editId = null; draft(); render(); sheet(adminHTML());
+  if (!old && !f && !confirm("No photo selected. Add this product without a photo?")) return;
+  const b = document.querySelector('[data-a="save"]'); b.disabled = true; b.textContent = "Saving...";
+  await adm(async () => {
+    const body = { name, price: +pv, description: $("#ad").value.trim() };
+    if (f) body.img = await compress(f);
+    if (old) await SB.req("/rest/v1/products?id=eq." + old.id, { method: "PATCH", headers: SB.h(), body: JSON.stringify(body) });
+    else await SB.req("/rest/v1/products", { method: "POST", headers: SB.h({ Prefer: "return=minimal" }), body: JSON.stringify(body) });
+    editId = null; await load(true); sheet(adminHTML());
+  });
+  if (b.isConnected) { b.disabled = false; b.textContent = (old ? "Update" : "Add") + " product"; }
 }
-function exportJSON() {
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([JSON.stringify(real())], { type: "application/json" }));
-  a.download = "products.json"; a.click();
+async function ordersHTML() {
+  const rows = await SB.req("/rest/v1/orders?select=*&order=created_at.desc&limit=50", { headers: SB.h() });
+  return `<h3>Orders</h3><button class="sb" data-a="admin" style="margin:0 0 6px">&larr; Back</button>` +
+    (rows.map(o => `<div class="row" style="align-items:flex-start"><div class="gr"><b>${esc(o.order_no)} - ${money(o.total)}</b><span class="mut">${esc(o.name)} - <a href="tel:${esc(o.phone)}">${esc(o.phone)}</a></span><span class="mut">${esc(o.address)}</span><span class="mut">${(o.items || []).map(i => esc(i.name) + " x" + i.qty).join(", ")}</span>${o.note ? `<span class="mut">Note: ${esc(o.note)}</span>` : ""}<span style="font-weight:600">${o.status === "done" ? "Done" : "New"}</span></div><button class="sb" data-a="odone" data-id="${o.id}" data-s="${o.status}">${o.status === "done" ? "Reopen" : "Mark done"}</button><button class="sb" data-a="odel" data-id="${o.id}">Delete</button></div>`).join("") || `<p class="mut">No orders yet.</p>`);
 }
 
 /* =================== ACTIONS =================== */
 const A = {
-  close: closeSheet, bag: openBag, order: placeOrder, save: saveP, export: exportJSON,
+  close: closeSheet, bag: openBag, order: placeOrder, save: saveP,
   detail(id) { const p = products.find(x => x.id === id); if (!p) return; sheet(`${p.img ? `<img class="dimg" src="${p.img}" alt="">` : ""}<h3>${esc(p.name)}</h3><p style="font-weight:600;margin:4px 0 10px">${money(p.price)}</p><p class="mut">${esc(p.desc)}</p>${p.soldOut ? `<button class="btn wide" disabled>Sold out</button>` : `<button class="btn wide" data-a="buy" data-id="${p.id}">Buy</button>`}`); },
   buy(id) { cart[id] = (cart[id] || 0) + 1; saveCart(); openBag(); },
   inc(id) { cart[id]++; saveCart(); openBag(); },
   dec(id) { if (--cart[id] <= 0) delete cart[id]; saveCart(); openBag(); },
-  admin() { sheet(admin ? adminHTML() : loginHTML()); },
-  login() { if ($("#pw").value === CONFIG.adminPassword) { admin = true; sheet(adminHTML()); } else alert("Wrong password."); },
+  admin() {
+    if (!LIVE) { sheet(`<h3>Setup needed</h3><p class="mut">Add your Supabase URL and key at the top of the script to turn on live products and the admin panel.</p>`); return; }
+    sheet(SB.token ? adminHTML() : loginHTML());
+  },
+  async login() {
+    try {
+      const r = await SB.req("/auth/v1/token?grant_type=password", { method: "POST", headers: { apikey: CONFIG.supabaseKey, "Content-Type": "application/json" }, body: JSON.stringify({ email: $("#pe").value.trim(), password: $("#pw").value }) });
+      SB.token = r.access_token; LS.set("izax_sess", { t: r.access_token, exp: Date.now() + (r.expires_in - 60) * 1000 });
+      sheet(adminHTML());
+    } catch { alert("Wrong email or password."); }
+  },
+  logout() { SB.token = null; LS.del("izax_sess"); closeSheet(); },
   edit(id) { editId = id; sheet(adminHTML()); },
   cancel() { editId = null; sheet(adminHTML()); },
-  sold(id) { products = real().map(p => p.id === id ? { ...p, soldOut: !p.soldOut } : p); draft(); render(); sheet(adminHTML()); },
-  del(id) { if (!confirm("Delete this product?")) return; products = real().filter(p => p.id !== id); draft(); render(); sheet(adminHTML()); },
-  reset() { LS.del("izax_draft"); load().then(() => sheet(adminHTML())); },
+  sold(id) { const p = products.find(x => x.id === id); adm(async () => { await SB.req("/rest/v1/products?id=eq." + id, { method: "PATCH", headers: SB.h(), body: JSON.stringify({ sold_out: !p.soldOut }) }); await load(true); sheet(adminHTML()); }); },
+  del(id) { if (!confirm("Delete this product permanently?")) return; adm(async () => { await SB.req("/rest/v1/products?id=eq." + id, { method: "DELETE", headers: SB.h() }); await load(true); sheet(adminHTML()); }); },
+  orders() { adm(async () => { sheet(`<h3>Orders</h3><p class="mut">Loading...</p>`); sheet(await ordersHTML()); }); },
+  odone(id, el) { adm(async () => { await SB.req("/rest/v1/orders?id=eq." + id, { method: "PATCH", headers: SB.h(), body: JSON.stringify({ status: el.dataset.s === "done" ? "new" : "done" }) }); sheet(await ordersHTML()); }); },
+  odel(id) { if (!confirm("Delete this order?")) return; adm(async () => { await SB.req("/rest/v1/orders?id=eq." + id, { method: "DELETE", headers: SB.h() }); sheet(await ordersHTML()); }); },
   install() {
     if (deferred) { deferred.prompt(); deferred = null; $("#inst").hidden = true; }
     else sheet(`<h3>Install the IZAX app</h3><ol style="padding-left:20px;line-height:1.9"><li>Tap the <b>Share</b> button in Safari</li><li>Scroll down and tap <b>Add to Home Screen</b></li><li>Tap <b>Add</b></li></ol>`);
   }
 };
-document.addEventListener("click", e => { const t = e.target.closest("[data-a]"); if (!t) return; e.preventDefault(); if (A[t.dataset.a]) A[t.dataset.a](t.dataset.id); });
+document.addEventListener("click", e => { const t = e.target.closest("[data-a]"); if (!t) return; e.preventDefault(); if (A[t.dataset.a]) A[t.dataset.a](t.dataset.id, t); });
 $("#wa").href = "https://wa.me/" + CONFIG.whatsapp;
 
 /* =================== APP MODE (PWA) =================== */
@@ -360,6 +405,8 @@ $("#intro").addEventListener("click", enterSite);
 setTimeout(enterSite, INTRO_TIME);
 
 load();
+setInterval(load, 30000);                                   // new products appear for visitors without refreshing
+document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
 </script>
 </body>
 </html>

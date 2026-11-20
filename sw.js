@@ -1,28 +1,32 @@
-create table products (
-  id uuid primary key default gen_random_uuid(),
-  name text not null,
-  price numeric not null,
-  description text default '',
-  img text default '',
-  sold_out boolean default false,
-  created_at timestamptz default now()
-);
-create table orders (
-  id uuid primary key default gen_random_uuid(),
-  order_no text, name text, phone text, address text, note text,
-  items jsonb, total numeric,
-  status text default 'new',
-  created_at timestamptz default now()
-);
-alter table products enable row level security;
-alter table orders enable row level security;
+/* IZAX service worker - app-a offline-layum open aaga vaikkum */
+const CACHE = "izax-v1";
+const ASSETS = ["./", "./index.html"];
 
-create policy "anyone views products" on products for select using (true);
-create policy "admin manages products" on products for all to authenticated
-  using ((auth.jwt()->>'email') = 'your@email.com')
-  with check ((auth.jwt()->>'email') = 'your@email.com');
+self.addEventListener("install", (e) => {
+  e.waitUntil(
+    caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting())
+  );
+});
 
-create policy "anyone places orders" on orders for insert to anon, authenticated with check (true);
-create policy "admin manages orders" on orders for all to authenticated
-  using ((auth.jwt()->>'email') = 'your@email.com')
-  with check ((auth.jwt()->>'email') = 'your@email.com');
+self.addEventListener("activate", (e) => {
+  e.waitUntil(
+    caches.keys()
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim())
+  );
+});
+
+/* Online-la irundha eppavum pudhu version edukkum, offline-na saved version kaattum */
+self.addEventListener("fetch", (e) => {
+  const req = e.request;
+  if (req.method !== "GET" || new URL(req.url).origin !== self.location.origin) return;
+  e.respondWith(
+    fetch(req)
+      .then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(req, copy));
+        return res;
+      })
+      .catch(() => caches.match(req).then((r) => r || caches.match("./index.html")))
+  );
+});

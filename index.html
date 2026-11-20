@@ -178,7 +178,7 @@ const saveCart = () => { LS.set("izax_cart", cart); badge(); };
 /* =================== PRODUCTS =================== */
 let lastSig = "";
 async function load(force) {
-  if (!LIVE) { products = SAMPLE; render(); return; }
+  if (!LIVE) { if (!products.length) { products = SAMPLE; render(); } return; }
   try {
     const rows = await SB.req("/rest/v1/products?select=*&order=created_at.desc", { headers: SB.h() });
     const list = rows.map(r => ({ id: r.id, name: r.name, price: +r.price, desc: r.description || "", img: r.img || "", soldOut: !!r.sold_out }));
@@ -190,7 +190,10 @@ async function load(force) {
 }
 function render() {
   const own = !!SB.token;   // true only when the owner is logged in
-  const up = (p, txt) => own ? `<label class="btn o up"><span>${txt}</span><input class="fi" type="file" accept="image/*" data-up="${p.id}"></label>` : (!LIVE ? `<button class="btn o up" data-a="admin">${txt}</button>` : "");
+  // Upload button: shows for the owner (logged in) or in demo mode. Touching it opens the phone gallery.
+  const up = (p, txt) => (own || !LIVE)
+    ? `<label class="btn o up"><span>${txt}</span><input class="fi" type="file" accept="image/*" data-up="${p.id}"></label>`
+    : "";
   $("#grid").innerHTML = products.map((p, i) => `
     <article class="tile rv ${i % 3 === 2 ? "dk" : ""}">
       <h3>${esc(p.name)}</h3>
@@ -355,6 +358,13 @@ document.addEventListener("click", e => { const t = e.target.closest("[data-a]")
 document.addEventListener("change", async e => {   // owner uploads a photo straight from a product tile
   const id = e.target.dataset && e.target.dataset.up, f = e.target.files && e.target.files[0];
   if (!id || !f) return;
+  if (!LIVE) {   // demo mode: preview on this phone only (not permanent)
+    try {
+      const p = products.find(x => x.id === id);
+      if (p) { p.img = await blobURL((await resizeImg(f, 1400)).blob); render(); }
+    } catch (err) { alert("Could not read that image."); }
+    return;
+  }
   const label = e.target.parentNode.querySelector("span"), old = label.textContent;
   label.textContent = "Uploading...";
   await adm(async () => {

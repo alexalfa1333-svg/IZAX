@@ -55,7 +55,8 @@ nav .mid{display:flex;gap:28px}
 .btn.o{background:transparent;color:var(--blue);box-shadow:inset 0 0 0 1px var(--blue)}
 .hero .btn.o,.dk .btn.o{color:#2997ff;box-shadow:inset 0 0 0 1px #2997ff}
 .btn.wide{display:block;width:100%;margin-top:16px;text-align:center}
-.btn[disabled]{background:#d2d2d7;cursor:default}
+.btn[disabled]{background:#d2d2d7;color:#fff;cursor:default}
+.btn.o[disabled]{background:transparent;color:#aeaeb2;box-shadow:inset 0 0 0 1px #d2d2d7}
 .orb{width:min(70vw,360px);aspect-ratio:1;margin:54px auto 0;border-radius:50%;position:relative;display:grid;place-items:center;background:radial-gradient(circle at 35% 30%,#3a3a3f,#0a0a0b 65%);box-shadow:0 0 90px rgba(255,255,255,.12),inset 0 0 40px rgba(255,255,255,.08);animation:float 6s ease-in-out infinite;font:900 clamp(34px,9vw,60px) "Arial Black",Arial,sans-serif;letter-spacing:.12em;padding-left:.12em;text-shadow:0 0 24px rgba(255,255,255,.4)}
 .orb::before{content:"";position:absolute;inset:-3px;border-radius:50%;background:conic-gradient(from 0deg,transparent,rgba(255,255,255,.95),transparent 40%);-webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 2px),#000 calc(100% - 1px));mask:radial-gradient(farthest-side,transparent calc(100% - 2px),#000 calc(100% - 1px));animation:spin 5s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -80,6 +81,8 @@ nav .mid{display:flex;gap:28px}
 .up{position:relative;overflow:hidden;font-size:15px;padding:10px 18px;margin:14px auto 24px;cursor:pointer}
 .ph .up{margin:0}
 .fi{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
+.pbar{margin:14px 0 24px}
+.pnote{font-size:13px;margin-top:10px}
 .feat{display:grid;gap:40px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));text-align:center}
 .feat h3{font-size:24px;margin-bottom:8px}
 .feat p{font-size:17px;color:var(--mut)}
@@ -106,6 +109,11 @@ footer a{margin-right:18px;cursor:pointer}
 .sb{padding:6px 10px;font-size:13px;margin-left:4px}
 .tot{display:flex;justify-content:space-between;padding:16px 0 0;font-size:19px}
 .dimg{width:100%;border-radius:16px;margin:10px 0 16px;max-height:440px;object-fit:contain;background:var(--gray)}
+.prev{display:block;width:100%;max-height:220px;object-fit:contain;border-radius:12px;margin-top:10px;background:var(--gray)}
+
+/* ---------- TOAST ---------- */
+.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#1d1d1f;color:#fff;padding:12px 20px;border-radius:980px;font-size:15px;z-index:400;opacity:0;pointer-events:none;transition:opacity .3s;white-space:nowrap}
+.toast.show{opacity:1}
 </style>
 </head>
 <body class="lock">
@@ -150,12 +158,13 @@ footer a{margin-right:18px;cursor:pointer}
 </footer>
 
 <div id="ov" hidden><div id="sheet"><button class="x" data-a="close" aria-label="Close">&times;</button><div id="sc"></div></div></div>
+<div class="toast" id="toast" role="status"></div>
 
 <script>
 /* =================== SETTINGS: change these =================== */
 const CONFIG = {
-  supabaseUrl: "https://xxxx.supabase.co",   // <-- unga real Supabase Project URL inga podunga
-  supabaseKey: "ungal anon key",             // <-- unga real anon / publishable key inga podunga
+  supabaseUrl: "https://xxxx.supabase.co",   // Your Supabase Project URL
+  supabaseKey: "ungal anon key",             // Your Supabase anon / publishable key
   whatsapp: "94765297182",                   // WhatsApp number with country code, no + or spaces
   currency: "USD"
 };
@@ -166,19 +175,30 @@ const LIVE = /^https:\/\/[\w-]+\.supabase\.co$/.test(BASE) && CONFIG.supabaseKey
 const $ = s => document.querySelector(s);
 const LS = {
   get(k, d) { try { const v = JSON.parse(localStorage.getItem(k)); return v === null ? d : v; } catch { return d; } },
-  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } },
   del(k) { try { localStorage.removeItem(k); } catch {} }
 };
 const money = n => CONFIG.currency + " " + Number(n).toLocaleString("en-US");
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const SAMPLE = [{ id: "s1", name: "Sample Product", price: 2500, desc: "This is a sample. Connect Supabase (see the setup steps) to add your own products.", img: "", soldOut: false }];
-let products = [], cart = LS.get("izax_cart", {}), admin = false, editId = null, introDone = false;
+let products = [], cart = LS.get("izax_cart", {}), editId = null, introDone = false;
+const demoImgs = LS.get("izax_demo_imgs", {});   // demo mode only: photos saved on this device
+const pending = {};                               // photos chosen but not saved yet: { productId: { file, url } }
 const saveCart = () => { LS.set("izax_cart", cart); badge(); };
+
+let toastT;
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 2400);
+}
 
 /* =================== PRODUCTS =================== */
 let lastSig = "";
 async function load(force) {
-  if (!LIVE) { if (!products.length) { products = SAMPLE; render(); } return; }
+  if (!LIVE) {
+    if (!products.length) { products = SAMPLE.map(p => ({ ...p, img: demoImgs[p.id] || p.img })); render(); }
+    return;
+  }
   try {
     const rows = await SB.req("/rest/v1/products?select=*&order=created_at.desc", { headers: SB.h() });
     const list = rows.map(r => ({ id: r.id, name: r.name, price: +r.price, desc: r.description || "", img: r.img || "", soldOut: !!r.sold_out }));
@@ -188,19 +208,33 @@ async function load(force) {
     if (!products.length) $("#grid").innerHTML = `<p class="mut">Could not load products. Please check your connection and refresh.</p>`;
   }
 }
-function render() {
-  const own = !!SB.token;   // true only when the owner is logged in
-  // Upload button: shows for the owner (logged in) or in demo mode. Touching it opens the phone gallery.
-  const up = (p, txt) => (own || !LIVE)
+
+/* The photo area of a product tile. Three states:
+   1) a photo was just chosen  -> preview with "Save photo" and "Cancel"
+   2) the product has a photo  -> photo with "Change photo"
+   3) no photo yet             -> placeholder with "Upload photo" */
+function mediaHTML(p, canEdit) {
+  const pick = txt => canEdit
     ? `<label class="btn o up"><span>${txt}</span><input class="fi" type="file" accept="image/*" data-up="${p.id}"></label>`
     : "";
+  const pd = pending[p.id];
+  if (pd) {
+    return `<img src="${pd.url}" alt="Photo preview">
+      <div class="btns pbar"><button class="btn" data-a="savephoto" data-id="${p.id}">Save photo</button><button class="btn o" data-a="cancelphoto" data-id="${p.id}">Cancel</button></div>`;
+  }
+  if (p.img) return `<img src="${p.img}" alt="${esc(p.name)}" loading="lazy" decoding="async">${pick("Change photo")}`;
+  return `<div class="ph"><b>IZAX Product</b>${pick("Upload photo")}</div>`;
+}
+function render() {
+  const canEdit = !!SB.token || !LIVE;   // owner is logged in, or demo mode
+  const shown = new Set([...document.querySelectorAll("#grid .tile.in")].map(t => t.dataset.id));   // avoid replaying the reveal animation
   $("#grid").innerHTML = products.map((p, i) => `
-    <article class="tile rv ${i % 3 === 2 ? "dk" : ""}">
+    <article class="tile rv ${i % 3 === 2 ? "dk" : ""} ${shown.has(p.id) ? "in" : ""}" data-id="${p.id}">
       <h3>${esc(p.name)}</h3>
       <p>${esc((p.desc || "").slice(0, 90))}</p>
       <p class="pr">${p.soldOut ? "Sold out" : "From " + money(p.price)}</p>
       <div class="btns">${p.soldOut ? "" : `<button class="btn" data-a="buy" data-id="${p.id}">Buy</button>`}<button class="btn o" data-a="detail" data-id="${p.id}">Details</button></div>
-      ${p.img ? `<img src="${p.img}" alt="${esc(p.name)}" loading="lazy" decoding="async">${up(p, "Change photo")}` : `<div class="ph"><b>IZAX Product</b>${up(p, "Upload photo")}</div>`}
+      ${mediaHTML(p, canEdit)}
     </article>`).join("") || `<p class="mut">New products are coming soon.</p>`;
   observe(); badge();
 }
@@ -256,22 +290,26 @@ const SB = {
 };
 const sess = LS.get("izax_sess", null);
 if (sess && sess.exp > Date.now()) SB.token = sess.t;
+
+/* Runs an admin action and shows a clear message if it fails */
 async function adm(fn) {
-  try { await fn(); }
+  try { await fn(); return true; }
   catch (e) {
     const m = String(e.message);
     if (/row-level|permission/i.test(m)) alert("This account is not allowed to do that. Check the admin email in your SQL policy.");
-    else if (/jwt|expired|401/i.test(m)) { SB.token = null; LS.del("izax_sess"); render(); alert("Please log in again."); sheet(loginHTML()); }
+    else if (/jwt|expired|401/i.test(m)) { SB.token = null; LS.del("izax_sess"); render(); alert("Your session expired. Please log in again."); sheet(loginHTML()); }
     else alert("Something went wrong: " + m);
+    return false;
   }
 }
 const loginHTML = () => `<h3>Admin login</h3><p class="mut">Use the admin email and password you created in Supabase.</p><input id="pe" type="email" placeholder="Email" autocomplete="username"><input id="pw" type="password" placeholder="Password" autocomplete="current-password"><button class="btn wide" data-a="login">Log in</button>`;
 function adminHTML() {
   const e = products.find(p => p.id === editId) || {};
-  return `<h3>Admin</h3><p class="mut sm">${editId ? "Editing product" : "Add a new product. It goes live for everyone straight away."}</p>
-    <input id="an" placeholder="Product name" value="${esc(e.name)}"><input id="ap" type="number" placeholder="Price (${CONFIG.currency})" value="${e.price == null ? "" : e.price}"><textarea id="ad" rows="3" placeholder="Description">${esc(e.desc)}</textarea><input id="af" type="file" accept="image/*">
+  return `<h3>Admin</h3><p class="mut sm">${editId ? "Editing product" : "Add a new product. It goes live for everyone as soon as you save."}</p>
+    <input id="an" placeholder="Product name" value="${esc(e.name)}"><input id="ap" type="number" placeholder="Price (${CONFIG.currency})" value="${e.price == null ? "" : e.price}"><textarea id="ad" rows="3" placeholder="Description">${esc(e.desc)}</textarea><input id="af" type="file" accept="image/*" data-prev="1">
+    <img id="apv" class="prev" alt="" hidden>
     <p class="mut sm">Tip: export your design from Canva as PNG (best) or JPG, save it to Photos, then choose it here. Photos stay sharp, up to 2400 px.</p>
-    <button class="btn wide" data-a="save">${editId ? "Update" : "Add"} product</button>${editId ? `<button class="btn o wide" data-a="cancel">Cancel</button>` : ""}
+    <button class="btn wide" data-a="save">${editId ? "Save changes" : "Save product"}</button>${editId ? `<button class="btn o wide" data-a="cancel">Cancel</button>` : ""}
     <h3 style="margin-top:28px;font-size:20px">Your products</h3>` +
     (products.map(p => `<div class="row"><div class="gr"><b>${esc(p.name)}</b><span class="mut">${money(p.price)}${p.soldOut ? " - sold out" : ""}</span></div><button class="sb" data-a="edit" data-id="${p.id}">Edit</button><button class="sb" data-a="sold" data-id="${p.id}">${p.soldOut ? "Restock" : "Sold out"}</button><button class="sb" data-a="del" data-id="${p.id}">Delete</button></div>`).join("") || `<p class="mut">No products yet.</p>`) +
     `<div class="btns"><button class="btn o" data-a="orders">View orders</button><button class="btn o" data-a="logout">Log out</button></div>`;
@@ -291,36 +329,48 @@ function resizeImg(file, max) {
   });
 }
 const blobURL = b => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(b); });
-async function uploadImg(file) {   // keeps photos sharp (up to 2400 px) and PNG transparency
-  try {
-    const { blob, ext } = await resizeImg(file, 2400);
-    const name = Date.now().toString(36) + Math.random().toString(36).slice(2, 6) + "." + ext;
-    const r = await fetch(BASE + "/storage/v1/object/products/" + name, { method: "POST", headers: { apikey: CONFIG.supabaseKey, Authorization: "Bearer " + SB.token, "Content-Type": blob.type, "x-upsert": "true" }, body: blob });
-    if (!r.ok) throw new Error(await r.text());
-    return BASE + "/storage/v1/object/public/products/" + name;
-  } catch (e) {
-    return blobURL((await resizeImg(file, 1400)).blob);   // fallback if the storage bucket is not set up yet
+
+/* Uploads a photo to Supabase Storage (bucket "products") and returns its public URL.
+   Keeps photos sharp (up to 2400 px) and keeps PNG transparency. */
+async function uploadImg(file) {
+  const { blob, ext } = await resizeImg(file, 2400);
+  const name = Date.now().toString(36) + Math.random().toString(36).slice(2, 6) + "." + ext;
+  const r = await fetch(BASE + "/storage/v1/object/products/" + name, { method: "POST", headers: { apikey: CONFIG.supabaseKey, Authorization: "Bearer " + SB.token, "Content-Type": blob.type, "x-upsert": "true" }, body: blob });
+  if (!r.ok) {
+    const t = await r.text();
+    if (/bucket/i.test(t) && /not found/i.test(t)) throw new Error("The storage bucket named \"products\" does not exist yet. Create it in Supabase (Storage) and make it public.");
+    throw new Error(t || "Photo upload failed.");
   }
+  return BASE + "/storage/v1/object/public/products/" + name;
 }
+
+/* Save button inside the admin sheet (add or update a product) */
 async function saveP() {
   const name = $("#an").value.trim(), pv = $("#ap").value;
   if (!name || pv === "") { alert("Enter a product name and price."); return; }
   const old = products.find(p => p.id === editId), f = $("#af").files[0];
-  if (!old && !f && !confirm("No photo selected. Add this product without a photo?")) return;
-  const b = document.querySelector('[data-a="save"]'); b.disabled = true; b.textContent = "Saving...";
-  await adm(async () => {
+  if (!old && !f && !confirm("No photo selected. Save this product without a photo?")) return;
+  const b = document.querySelector('[data-a="save"]'), label = old ? "Save changes" : "Save product";
+  b.disabled = true; b.textContent = "Saving...";
+  const ok = await adm(async () => {
     const body = { name, price: +pv, description: $("#ad").value.trim() };
     if (f) body.img = await uploadImg(f);
     if (old) await SB.req("/rest/v1/products?id=eq." + old.id, { method: "PATCH", headers: SB.h(), body: JSON.stringify(body) });
     else await SB.req("/rest/v1/products", { method: "POST", headers: SB.h({ Prefer: "return=minimal" }), body: JSON.stringify(body) });
     editId = null; await load(true); sheet(adminHTML());
   });
-  if (b.isConnected) { b.disabled = false; b.textContent = (old ? "Update" : "Add") + " product"; }
+  if (ok) toast("Product saved");
+  if (b.isConnected) { b.disabled = false; b.textContent = label; }
 }
 async function ordersHTML() {
   const rows = await SB.req("/rest/v1/orders?select=*&order=created_at.desc&limit=50", { headers: SB.h() });
   return `<h3>Orders</h3><button class="sb" data-a="admin" style="margin:0 0 6px">&larr; Back</button>` +
     (rows.map(o => `<div class="row" style="align-items:flex-start"><div class="gr"><b>${esc(o.order_no)} - ${money(o.total)}</b><span class="mut">${esc(o.name)} - <a href="tel:${esc(o.phone)}">${esc(o.phone)}</a></span><span class="mut">${esc(o.address)}</span><span class="mut">${(o.items || []).map(i => esc(i.name) + " x" + i.qty).join(", ")}</span>${o.note ? `<span class="mut">Note: ${esc(o.note)}</span>` : ""}<span style="font-weight:600">${o.status === "done" ? "Done" : "New"}</span></div><button class="sb" data-a="odone" data-id="${o.id}" data-s="${o.status}">${o.status === "done" ? "Reopen" : "Mark done"}</button><button class="sb" data-a="odel" data-id="${o.id}">Delete</button></div>`).join("") || `<p class="mut">No orders yet.</p>`);
+}
+
+/* =================== PHOTO PREVIEW / SAVE / CANCEL =================== */
+function dropPending(id) {
+  if (pending[id]) { URL.revokeObjectURL(pending[id].url); delete pending[id]; }
 }
 
 /* =================== ACTIONS =================== */
@@ -344,36 +394,61 @@ const A = {
   logout() { SB.token = null; LS.del("izax_sess"); closeSheet(); render(); },
   edit(id) { editId = id; sheet(adminHTML()); },
   cancel() { editId = null; sheet(adminHTML()); },
-  sold(id) { const p = products.find(x => x.id === id); adm(async () => { await SB.req("/rest/v1/products?id=eq." + id, { method: "PATCH", headers: SB.h(), body: JSON.stringify({ sold_out: !p.soldOut }) }); await load(true); sheet(adminHTML()); }); },
-  del(id) { if (!confirm("Delete this product permanently?")) return; adm(async () => { await SB.req("/rest/v1/products?id=eq." + id, { method: "DELETE", headers: SB.h() }); await load(true); sheet(adminHTML()); }); },
+  sold(id) { const p = products.find(x => x.id === id); adm(async () => { await SB.req("/rest/v1/products?id=eq." + id, { method: "PATCH", headers: SB.h(), body: JSON.stringify({ sold_out: !p.soldOut }) }); await load(true); sheet(adminHTML()); toast("Saved"); }); },
+  del(id) { if (!confirm("Delete this product permanently?")) return; adm(async () => { await SB.req("/rest/v1/products?id=eq." + id, { method: "DELETE", headers: SB.h() }); await load(true); sheet(adminHTML()); toast("Product deleted"); }); },
   orders() { adm(async () => { sheet(`<h3>Orders</h3><p class="mut">Loading...</p>`); sheet(await ordersHTML()); }); },
   odone(id, el) { adm(async () => { await SB.req("/rest/v1/orders?id=eq." + id, { method: "PATCH", headers: SB.h(), body: JSON.stringify({ status: el.dataset.s === "done" ? "new" : "done" }) }); sheet(await ordersHTML()); }); },
   odel(id) { if (!confirm("Delete this order?")) return; adm(async () => { await SB.req("/rest/v1/orders?id=eq." + id, { method: "DELETE", headers: SB.h() }); sheet(await ordersHTML()); }); },
+
+  /* Save the previewed photo to the product */
+  async savephoto(id, el) {
+    const pd = pending[id]; if (!pd) return;
+    el.disabled = true; el.textContent = "Saving...";
+    if (!LIVE) {
+      /* Demo mode: the photo is saved on this device only. Connect Supabase to save it for everyone. */
+      try {
+        const img = await blobURL((await resizeImg(pd.file, 1400)).blob);
+        const p = products.find(x => x.id === id); if (p) p.img = img;
+        demoImgs[id] = img;
+        if (!LS.set("izax_demo_imgs", demoImgs)) toast("Saved for now, but this device has no space to keep it");
+        else toast("Photo saved on this device");
+        dropPending(id); render();
+      } catch (err) { alert("Could not read that image."); el.disabled = false; el.textContent = "Save photo"; }
+      return;
+    }
+    const ok = await adm(async () => {
+      const img = await uploadImg(pd.file);
+      await SB.req("/rest/v1/products?id=eq." + id, { method: "PATCH", headers: SB.h(), body: JSON.stringify({ img }) });
+      dropPending(id);
+      await load(true);
+    });
+    if (ok) toast("Photo saved");
+    else if (el.isConnected) { el.disabled = false; el.textContent = "Save photo"; }
+  },
+  cancelphoto(id) { dropPending(id); render(); },
+
   install() {
     if (deferred) { deferred.prompt(); deferred = null; $("#inst").hidden = true; }
     else sheet(`<h3>Install the IZAX app</h3><ol style="padding-left:20px;line-height:1.9"><li>Tap the <b>Share</b> button in Safari</li><li>Scroll down and tap <b>Add to Home Screen</b></li><li>Tap <b>Add</b></li></ol>`);
   }
 };
 document.addEventListener("click", e => { const t = e.target.closest("[data-a]"); if (!t) return; e.preventDefault(); if (A[t.dataset.a]) A[t.dataset.a](t.dataset.id, t); });
-document.addEventListener("change", async e => {   // owner uploads a photo straight from a product tile
-  const id = e.target.dataset && e.target.dataset.up, f = e.target.files && e.target.files[0];
-  if (!id || !f) return;
-  if (!LIVE) {   // demo mode: preview on this phone only (not permanent)
-    try {
-      const p = products.find(x => x.id === id);
-      if (p) { p.img = await blobURL((await resizeImg(f, 1400)).blob); render(); }
-    } catch (err) { alert("Could not read that image."); }
+
+/* When a photo is chosen: show a preview first. Nothing is stored until "Save photo" is tapped. */
+document.addEventListener("change", e => {
+  const el = e.target, f = el.files && el.files[0];
+  if (!f) return;
+  if (el.dataset.prev) {   // preview inside the admin sheet
+    const pv = $("#apv"); pv.src = URL.createObjectURL(f); pv.hidden = false;
     return;
   }
-  const label = e.target.parentNode.querySelector("span"), old = label.textContent;
-  label.textContent = "Uploading...";
-  await adm(async () => {
-    const img = await uploadImg(f);
-    await SB.req("/rest/v1/products?id=eq." + id, { method: "PATCH", headers: SB.h(), body: JSON.stringify({ img }) });
-    await load(true);
-  });
-  if (label.isConnected) label.textContent = old;
+  const id = el.dataset.up;
+  if (!id) return;
+  dropPending(id);
+  pending[id] = { file: f, url: URL.createObjectURL(f) };
+  render();
 });
+
 function ownerLink() { if (location.hash === "#owner") { history.replaceState(null, "", location.pathname + location.search); A.admin(); } }
 addEventListener("hashchange", ownerLink);
 let taps = 0, tapT; $("#copy").addEventListener("click", () => { taps++; clearTimeout(tapT); tapT = setTimeout(() => taps = 0, 2500); if (taps >= 5) { taps = 0; A.admin(); } });
